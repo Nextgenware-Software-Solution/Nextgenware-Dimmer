@@ -17,6 +17,9 @@ class SettingsDataStore(private val context: Context) {
     companion object {
         val BRIGHTNESS_KEY = floatPreferencesKey("brightness")
         val DIMMER_ENABLED_KEY = booleanPreferencesKey("dimmer_enabled")
+        val NOTIFICATION_LOCKED_KEY = booleanPreferencesKey("notification_locked")
+        val NOTIFICATION_ENABLED_KEY = booleanPreferencesKey("notification_enabled")
+        val NOTIFICATION_SWIPED_KEY = booleanPreferencesKey("notification_swiped")
     }
 
     val brightness: Flow<Float> = context.dataStore.data.map { preferences ->
@@ -25,6 +28,18 @@ class SettingsDataStore(private val context: Context) {
 
     val isDimmerEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[DIMMER_ENABLED_KEY] ?: false
+    }
+
+    val isNotificationLocked: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[NOTIFICATION_LOCKED_KEY] ?: true
+    }
+
+    val isNotificationEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[NOTIFICATION_ENABLED_KEY] ?: true
+    }
+
+    val isNotificationSwiped: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[NOTIFICATION_SWIPED_KEY] ?: false
     }
 
     suspend fun saveBrightness(brightness: Float) {
@@ -36,6 +51,26 @@ class SettingsDataStore(private val context: Context) {
     suspend fun setDimmerEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[DIMMER_ENABLED_KEY] = enabled
+        }
+    }
+
+    suspend fun setNotificationLocked(locked: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[NOTIFICATION_LOCKED_KEY] = locked
+        }
+    }
+
+    suspend fun setNotificationEnabled(enabled: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[NOTIFICATION_ENABLED_KEY] = enabled
+            // When toggling preference, reset swiped state
+            preferences[NOTIFICATION_SWIPED_KEY] = false
+        }
+    }
+
+    suspend fun setNotificationSwiped(swiped: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[NOTIFICATION_SWIPED_KEY] = swiped
         }
     }
 }

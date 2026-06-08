@@ -60,7 +60,14 @@
 
         <receiver
             android:name=".service.NotificationActionReceiver"
-            android:exported="false" />
+            android:exported="true">
+            <intent-filter>
+                <action android:name="com.nextgenware.dimmer.ACTION_TOGGLE_DIMMER" />
+                <action android:name="com.nextgenware.dimmer.ACTION_INCREASE_BRIGHTNESS" />
+                <action android:name="com.nextgenware.dimmer.ACTION_DECREASE_BRIGHTNESS" />
+                <action android:name="com.nextgenware.dimmer.ACTION_NOTIFICATION_DISMISSED" />
+            </intent-filter>
+        </receiver>
     </application>
 
 </manifest>

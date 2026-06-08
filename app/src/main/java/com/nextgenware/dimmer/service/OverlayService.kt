@@ -7,6 +7,7 @@ import android.app.PendingIntent
 import android.app.Service
 import android.content.Context
 import android.content.Intent
+import android.content.pm.ServiceInfo
 import android.graphics.Color
 import android.graphics.PixelFormat
 import android.os.Build
@@ -30,10 +31,11 @@ class OverlayService : Service() {
     private var overlayView: View? = null
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())
     private lateinit var repository: BrightnessRepository
+    private var isForeground = false
 
     companion object {
-        private const val NOTIFICATION_ID = 1
-        private const val CHANNEL_ID = "dimmer_service_channel"
+        private const val NOTIFICATION_ID = 101
+        private const val CHANNEL_ID = "dimmer_persistent_channel_v8"
     }
 
     override fun onCreate() {
@@ -43,26 +45,92 @@ class OverlayService : Service() {
         repository = BrightnessRepository(dataStore)
 
         createNotificationChannel()
-        // Initial foreground notification
-        startForeground(NOTIFICATION_ID, createNotification(0.5f, false))
-
         observeSettings()
+    }
+
+    override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
+        return START_STICKY
+    }
+
+    private fun safeStartForeground(notification: Notification) {
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    NOTIFICATION_ID,
+                    notification,
+                    ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE
+                )
+            } else {
+                startForeground(NOTIFICATION_ID, notification)
+            }
+            isForeground = true
+        } catch (e: Exception) {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+            manager.notify(NOTIFICATION_ID, notification)
+        }
     }
 
     private fun observeSettings() {
         serviceScope.launch {
-            combine(repository.brightness, repository.isDimmerEnabled) { brightness, enabled ->
-                brightness to enabled
-            }.collect { (brightness, enabled) ->
-                if (enabled) {
-                    showOverlay(brightness)
+            combine(
+                repository.brightness,
+                repository.isDimmerEnabled,
+                repository.isNotificationLocked,
+                repository.isNotificationEnabled,
+                repository.isNotificationSwiped
+            ) { brightness, enabled, locked, notificationEnabled, isSwiped ->
+                DataSnapshot(brightness, enabled, locked, notificationEnabled, isSwiped)
+            }.collect { snapshot ->
+                // Update Overlay
+                if (snapshot.enabled) {
+                    showOverlay(snapshot.brightness)
                 } else {
                     hideOverlay()
                 }
-                updateNotification(brightness, enabled)
+
+                // Update Notification Controller
+                if (snapshot.notificationEnabled) {
+                    if (snapshot.locked && snapshot.isSwiped) {
+                        // DETECTED SWIPE WHILE LOCKED: Immediately restore the 'not swiped' state to bring it back
+                        repository.setNotificationSwiped(false)
+                    } else if (!snapshot.isSwiped) {
+                        updateNotification(snapshot.brightness, snapshot.enabled, snapshot.locked)
+                    } else {
+                        // SWIPED AND UNLOCKED: Downgrade from foreground to background service
+                        if (isForeground) {
+                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                                stopForeground(STOP_FOREGROUND_REMOVE)
+                            } else {
+                                @Suppress("DEPRECATION")
+                                stopForeground(true)
+                            }
+                            isForeground = false
+                        }
+                    }
+                } else {
+                    // Notification manually disabled in settings
+                    if (isForeground) {
+                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                            stopForeground(STOP_FOREGROUND_REMOVE)
+                        } else {
+                            @Suppress("DEPRECATION")
+                            stopForeground(true)
+                        }
+                        isForeground = false
+                    }
+                    if (!snapshot.enabled) stopSelf()
+                }
             }
         }
     }
+
+    private data class DataSnapshot(
+        val brightness: Float,
+        val enabled: Boolean,
+        val locked: Boolean,
+        val notificationEnabled: Boolean,
+        val isSwiped: Boolean
+    )
 
     private fun showOverlay(brightness: Float) {
         if (overlayView == null) {
@@ -98,68 +166,72 @@ class OverlayService : Service() {
 
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             val channel = NotificationChannel(
                 CHANNEL_ID,
-                "Screen Dimmer Service",
-                NotificationManager.IMPORTANCE_LOW
+                "Screen Dimmer Pro Controls",
+                NotificationManager.IMPORTANCE_HIGH
             ).apply {
-                description = "Running overlay service"
+                description = "Brightness controls and status"
                 setShowBadge(false)
+                lockscreenVisibility = Notification.VISIBILITY_PUBLIC
             }
-            val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
             manager.createNotificationChannel(channel)
         }
     }
 
-    private fun createNotification(brightness: Float, enabled: Boolean): Notification {
+    private fun createNotification(brightness: Float, enabled: Boolean, locked: Boolean): Notification {
         val brightnessPercent = (brightness * 100).toInt()
         val toggleText = if (enabled) "OFF" else "ON"
 
-        val mainIntent = Intent(this, MainActivity::class.java)
-        val mainPendingIntent = PendingIntent.getActivity(
-            this, 0, mainIntent, PendingIntent.FLAG_IMMUTABLE
-        )
-
-        val toggleIntent = Intent(this, NotificationActionReceiver::class.java).apply {
-            action = Constants.ACTION_TOGGLE_DIMMER
+        val mainIntent = Intent(this, MainActivity::class.java).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP
         }
-        val togglePendingIntent = PendingIntent.getBroadcast(
-            this, 1, toggleIntent, PendingIntent.FLAG_IMMUTABLE
-        )
+        val mainPendingIntent = PendingIntent.getActivity(this, 100, mainIntent, PendingIntent.FLAG_IMMUTABLE)
 
-        val increaseIntent = Intent(this, NotificationActionReceiver::class.java).apply {
-            action = Constants.ACTION_INCREASE_BRIGHTNESS
-        }
-        val increasePendingIntent = PendingIntent.getBroadcast(
-            this, 2, increaseIntent, PendingIntent.FLAG_IMMUTABLE
-        )
+        // Using Broadcast Intents for all actions for maximum reliability
+        val toggleIntent = Intent(this, NotificationActionReceiver::class.java).apply { action = Constants.ACTION_TOGGLE_DIMMER }
+        val togglePendingIntent = PendingIntent.getBroadcast(this, 101, toggleIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-        val decreaseIntent = Intent(this, NotificationActionReceiver::class.java).apply {
-            action = Constants.ACTION_DECREASE_BRIGHTNESS
-        }
-        val decreasePendingIntent = PendingIntent.getBroadcast(
-            this, 3, decreaseIntent, PendingIntent.FLAG_IMMUTABLE
-        )
+        val increaseIntent = Intent(this, NotificationActionReceiver::class.java).apply { action = Constants.ACTION_INCREASE_BRIGHTNESS }
+        val increasePendingIntent = PendingIntent.getBroadcast(this, 102, increaseIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
 
-        return NotificationCompat.Builder(this, CHANNEL_ID)
-            .setContentTitle("Screen Dimmer")
-            .setContentText("Dimming: $brightnessPercent%")
+        val decreaseIntent = Intent(this, NotificationActionReceiver::class.java).apply { action = Constants.ACTION_DECREASE_BRIGHTNESS }
+        val decreasePendingIntent = PendingIntent.getBroadcast(this, 103, decreaseIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        // Swiped Away Detection
+        val deleteIntent = Intent(this, NotificationActionReceiver::class.java).apply { action = Constants.ACTION_NOTIFICATION_DISMISSED }
+        val deletePendingIntent = PendingIntent.getBroadcast(this, 104, deleteIntent, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT)
+
+        val builder = NotificationCompat.Builder(this, CHANNEL_ID)
+            .setContentTitle("Screen Dimmer Pro")
+            .setContentText("Dimming Level: $brightnessPercent%")
             .setSmallIcon(android.R.drawable.ic_menu_compass)
             .setContentIntent(mainPendingIntent)
-            .setOngoing(true)
-            .setVisibility(NotificationCompat.VISIBILITY_SECRET)
+            .setDeleteIntent(deletePendingIntent)
+            .setOngoing(locked)
+            .setCategory(NotificationCompat.CATEGORY_SERVICE)
+            .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
+            .setPriority(if (locked) NotificationCompat.PRIORITY_MAX else NotificationCompat.PRIORITY_HIGH)
             .addAction(android.R.drawable.ic_input_delete, "-", decreasePendingIntent)
             .addAction(android.R.drawable.ic_media_play, toggleText, togglePendingIntent)
             .addAction(android.R.drawable.ic_input_add, "+", increasePendingIntent)
-            .setStyle(androidx.media.app.NotificationCompat.MediaStyle()
-                .setShowActionsInCompactView(0, 1, 2))
-            .build()
+            .setStyle(androidx.media.app.NotificationCompat.MediaStyle().setShowActionsInCompactView(0, 1, 2))
+
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            builder.setForegroundServiceBehavior(NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+        }
+
+        val notification = builder.build()
+        if (locked) {
+            notification.flags = notification.flags or Notification.FLAG_ONGOING_EVENT or Notification.FLAG_NO_CLEAR
+        }
+        return notification
     }
 
-    private fun updateNotification(brightness: Float, enabled: Boolean) {
-        val notification = createNotification(brightness, enabled)
-        val manager = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
-        manager.notify(NOTIFICATION_ID, notification)
+    private fun updateNotification(brightness: Float, enabled: Boolean, locked: Boolean) {
+        val notification = createNotification(brightness, enabled, locked)
+        safeStartForeground(notification)
     }
 
     override fun onBind(intent: Intent?): IBinder? = null

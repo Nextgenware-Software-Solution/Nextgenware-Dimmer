@@ -26,6 +26,27 @@ class BrightnessViewModel(
             initialValue = false
         )
 
+    val isNotificationLocked: StateFlow<Boolean> = repository.isNotificationLocked
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = true
+        )
+
+    val isNotificationEnabled: StateFlow<Boolean> = repository.isNotificationEnabled
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = true
+        )
+
+    val isNotificationSwiped: StateFlow<Boolean> = repository.isNotificationSwiped
+        .stateIn(
+            scope = viewModelScope,
+            started = SharingStarted.WhileSubscribed(5000),
+            initialValue = false
+        )
+
     fun updateBrightness(value: Float) {
         viewModelScope.launch {
             repository.saveBrightness(value)
@@ -35,6 +56,25 @@ class BrightnessViewModel(
     fun toggleDimmer(enabled: Boolean) {
         viewModelScope.launch {
             repository.setDimmerEnabled(enabled)
+        }
+    }
+
+    fun setNotificationLocked(locked: Boolean) {
+        viewModelScope.launch {
+            repository.setNotificationLocked(locked)
+        }
+    }
+
+    fun setNotificationEnabled(enabled: Boolean) {
+        viewModelScope.launch {
+            repository.setNotificationEnabled(enabled)
+        }
+    }
+
+    fun restoreNotification() {
+        viewModelScope.launch {
+            repository.setNotificationSwiped(false)
+            repository.setNotificationEnabled(true)
         }
     }
 }

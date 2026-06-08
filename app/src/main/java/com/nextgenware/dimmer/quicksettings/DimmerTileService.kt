@@ -4,6 +4,7 @@ import android.content.Intent
 import android.os.Build
 import android.service.quicksettings.Tile
 import android.service.quicksettings.TileService
+import androidx.annotation.RequiresApi
 import com.nextgenware.dimmer.data.datastore.SettingsDataStore
 import com.nextgenware.dimmer.data.repository.BrightnessRepository
 import com.nextgenware.dimmer.service.OverlayService
@@ -13,6 +14,7 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
+@RequiresApi(Build.VERSION_CODES.N)
 class DimmerTileService : TileService() {
 
     private val serviceScope = CoroutineScope(Dispatchers.Main + Job())

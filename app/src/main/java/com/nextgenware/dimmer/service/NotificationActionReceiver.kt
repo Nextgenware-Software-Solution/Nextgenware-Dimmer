@@ -13,7 +13,8 @@ import kotlinx.coroutines.launch
 
 class NotificationActionReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        val repository = BrightnessRepository(SettingsDataStore(context))
+        val appContext = context.applicationContext
+        val repository = BrightnessRepository(SettingsDataStore(appContext))
         val scope = CoroutineScope(Dispatchers.IO)
 
         when (intent.action) {
@@ -33,6 +34,12 @@ class NotificationActionReceiver : BroadcastReceiver() {
                 scope.launch {
                     val current = repository.brightness.first()
                     repository.saveBrightness((current - Constants.BRIGHTNESS_STEP).coerceIn(Constants.MIN_BRIGHTNESS, Constants.MAX_BRIGHTNESS))
+                }
+            }
+            Constants.ACTION_NOTIFICATION_DISMISSED -> {
+                scope.launch {
+                    // Mark as swiped away
+                    repository.setNotificationSwiped(true)
                 }
             }
         }
