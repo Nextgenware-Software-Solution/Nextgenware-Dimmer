@@ -13,8 +13,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Scaffold
-import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.Text
+import androidx.compose.material3.TopAppBar
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -40,6 +40,7 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
         
+        // Request notification permission for Android 13+
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
             if (ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
                 requestPermissionLauncher.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -56,6 +57,7 @@ class MainActivity : ComponentActivity() {
                 val isDimmerEnabled by viewModel.isDimmerEnabled.collectAsState()
                 val isNotificationEnabled by viewModel.isNotificationEnabled.collectAsState()
 
+                // Manage service lifecycle based on settings
                 LaunchedEffect(isDimmerEnabled, isNotificationEnabled) {
                     if (isDimmerEnabled || isNotificationEnabled) {
                         val intent = Intent(this@MainActivity, OverlayService::class.java)
